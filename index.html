@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Workout Timer</title>
+    <style>
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-around;
+        height: 100vh;
+        margin: 0;
+        background-color: #f4f4f9;
+        transition: background-color 0.5s;
+        padding: 20px;
+        box-sizing: border-box;
+      }
+
+      /* --- Preparation Screen Styles --- */
+      #prep-screen {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        text-align: center;
+      }
+
+      #step-input-group label {
+        font-size: 1.2em;
+        margin-bottom: 10px;
+      }
+
+      #stepDurationInput {
+        padding: 15px;
+        font-size: 2em;
+        width: 200px;
+        text-align: center;
+        border: 3px solid #ccc;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
+
+      .button {
+        padding: 15px 40px;
+        font-size: 1.1em;
+        cursor: pointer;
+        border: none;
+        border-radius: 8px;
+        background-color: #007aff; /* iOS blue */
+        color: white;
+        transition: background-color 0.2s;
+      }
+
+      .button:hover {
+        background-color: #006ad1;
+      }
+
+      /* --- Workout Screen Styles --- */
+      #workout-screen {
+        display: none; /* Hidden by default, shown when ready */
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-around;
+        text-align: center;
+        width: 100dvw;
+        height: 100dvh;
+      }
+
+      #timer-display {
+        font-size: 15dvw; /* Large timer */
+        font-weight: bold;
+        padding: 30px 50px;
+        transition:
+          color 0.2s ease,
+          background-color 0.2s ease;
+        background-color: white; /* Default color */
+        border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+      }
+
+      #step-name {
+        margin-top: 10px;
+        font-size: 9dvw; /* Large step name */
+        color: white;
+        background-color: #333; /* Background for contrast */
+        padding: 20px 20px;
+        border-radius: 10px;
+        min-height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .status-message {
+        font-size: 1.5em;
+        color: #333;
+        padding: 10px 20px;
+        min-height: 40px;
+      }
+
+      /* Color Classes for Timer */
+      .timer-normal {
+        color: #333;
+        background-color: white;
+      }
+
+      .timer-warning {
+        color: red;
+        background-color: #ffdddd; /* Light red background */
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Preparation Screen -->
+    <div id="prep-screen">
+      <h1>Workout Timer Setup</h1>
+      <p>Enter the duration for one step in seconds:</p>
+
+      <div id="step-input-group">
+        <label for="stepDurationInput">Step Duration (Seconds)</label>
+        <input
+          type="number"
+          id="stepDurationInput"
+          min="10"
+          max="3600"
+          value=""
+          placeholder="e.g., 30"
+        />
+      </div>
+
+      <button class="button" id="startButton">Start Workout</button>
+    </div>
+
+    <!-- Workout Screen -->
+    <div id="workout-screen">
+      <div id="timer-display" class="timer-normal">00:00</div>
+
+      <div id="step-name">Ready to Go!</div>
+
+      <div id="statusMessage" class="status-message"></div>
+    </div>
+
+    <script>
+      // Define the workout sequence (Name only)
+      const WORKOUT_STEPS = [
+        { name: "GET READY" },
+        { name: "Småskutt" },
+        { name: "Body waves" },
+        { name: "Arm swings" },
+        { name: "Trunk twist" },
+        { name: "Forward arm circle" },
+        { name: "Squats" },
+        { name: "Backwards arm circle" },
+        { name: "Dead arms" },
+        { name: "Golf swings" },
+        { name: "Marches" },
+        { name: "Tip toe armswings" },
+        { name: "Windmills" },
+        { name: "Ballet squats" },
+        { name: "Wide arm step backs" },
+        { name: "Horse squats" },
+      ];
+
+      let timerInterval = null;
+      let isPaused = true;
+      let currentStepIndex = 0; // Tracks the index of the current step
+      let globalStepDurationSeconds = 30; // Default duration, set by input value
+
+      // --- DOM Elements ---
+      const prepScreen = document.getElementById("prep-screen");
+      const workoutScreen = document.getElementById("workout-screen");
+      const stepDurationInput = document.getElementById("stepDurationInput");
+      const startButton = document.getElementById("startButton");
+      const timerDisplay = document.getElementById("timer-display");
+      const stepNameDisplay = document.getElementById("step-name");
+      const statusMessage = document.getElementById("statusMessage");
+
+      const statusPaused = "PAUSED. Click anywhere to continue.";
+      const statusUnPaused = "Press anywhere to pause.";
+
+      /**
+       * Utility function to format seconds into "ss:ms" format (MM:SS).
+       * @param {number} totalSeconds - Total seconds remaining.
+       * @returns {string} Formatted time string.
+       */
+      function formatTime(totalSeconds) {
+        const s = String(Math.floor(Math.abs(totalSeconds) % 60)).padStart(
+          2,
+          "0",
+        );
+        const m = String(Math.floor(Math.abs(totalSeconds) / 60)).padStart(
+          2,
+          "0",
+        );
+
+        return `${m}:${s}`;
+      }
+
+      /**
+       * Initializes the timer for a given duration.
+       * @param {number} initialSeconds - The total time to count down from.
+       */
+      function startTimer(initialSeconds) {
+        if (timerInterval) {
+          clearInterval(timerInterval);
+        }
+
+        let currentTime = initialSeconds;
+
+        // Function to update the display and handle logic
+        const tick = () => {
+          currentTime--;
+          timerDisplay.textContent = formatTime(currentTime);
+          const currentStepName = WORKOUT_STEPS[currentStepIndex].name;
+
+          const remainingFiveSecondsThreshold = 5;
+          const isWarning =
+            currentTime <= remainingFiveSecondsThreshold && currentTime >= 0;
+
+          // Update timer color and status message based on time
+          if (isWarning) {
+            timerDisplay.classList.remove("timer-normal");
+            timerDisplay.classList.add("timer-warning");
+            const nextStepName = WORKOUT_STEPS[currentStepIndex + 1]
+              ? WORKOUT_STEPS[currentStepIndex + 1].name
+              : "Finished";
+            stepNameDisplay.textContent = `Next: ${nextStepName}`;
+          } else {
+            // Normal color
+            timerDisplay.classList.remove("timer-warning");
+            timerDisplay.classList.add("timer-normal");
+          }
+
+          // Check for end of step or workout
+          if (currentTime <= 0) {
+            clearInterval(timerInterval);
+            handleStepCompletion();
+          }
+        };
+
+        // Run the tick function immediately to set the initial state
+        tick();
+
+        // Set up the interval to tick every second
+        timerInterval = setInterval(tick, 1000);
+      }
+
+      /**
+       * Manages the transition to the next step in the workout sequence.
+       */
+      function handleStepCompletion() {
+        if (currentStepIndex < WORKOUT_STEPS.length - 1) {
+          // Move to the next step
+          currentStepIndex++;
+          const nextStepName = WORKOUT_STEPS[currentStepIndex].name;
+          stepNameDisplay.textContent = nextStepName;
+
+          // Wait briefly before starting the new timer for visual clarity
+          setTimeout(() => {
+            startTimer(globalStepDurationSeconds); // Use global duration here!
+          }, 500);
+        } else {
+          // Workout finished!
+          endWorkout();
+        }
+      }
+
+      /**
+       * Main function to start or pause the timer based on user interaction (click anywhere).
+       */
+      function toggleTimer() {
+        if (
+          currentStepIndex < WORKOUT_STEPS.length - 1 &&
+          (!isPaused || timerInterval === null)
+        ) {
+          // RESUME/START: Start the interval if it's currently null or paused state is detected.
+          if (!timerInterval) {
+            isPaused = false;
+            startTimer(globalStepDurationSeconds); // Restart using the global duration
+          }
+
+          statusMessage.textContent = statusUnPaused;
+        } else if (isPaused && timerInterval !== null) {
+          // PAUSE: Stop the interval
+          clearInterval(timerInterval);
+          timerInterval = null;
+          isPaused = true;
+          statusMessage.textContent = statusPaused;
+
+          // Update display to reflect paused state visually (e.g., showing time stopped)
+          timerDisplay.classList.remove("timer-warning");
+          timerDisplay.classList.add("timer-normal");
+        } else if (!isPaused && timerInterval === null) {
+          // Edge case: If we somehow reach here while running, do nothing or handle error.
+        }
+      }
+
+      /**
+       * Handles the transition back to the preparation screen.
+       */
+      function endWorkout() {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        isPaused = true;
+
+        // Update display state
+        timerDisplay.textContent = "00:00";
+        stepNameDisplay.textContent = "Workout Complete!";
+        statusMessage.textContent = "Returning to setup...";
+        timerDisplay.classList.remove("timer-warning");
+        timerDisplay.classList.add("timer-normal");
+
+        // Switch views and cleanup
+        prepScreen.style.display = "flex";
+        workoutScreen.style.display = "flex"; // Keep visible but reset state visually
+        setTimeout(() => {
+          prepScreen.querySelector("h1").textContent = "Workout Finished!";
+          prepScreen.querySelector("p").innerHTML =
+            `Your workout is complete! Click below to set up a new routine using ${globalStepDurationSeconds} second steps.`;
+          startButton.textContent = "Finish & Restart";
+
+          // Clear any previous step state and prepare for next run
+          currentStepIndex = 0;
+        }, 1500);
+      }
+
+      /**
+       * Main function to start or pause the timer based on user interaction (click anywhere).
+       */
+      function setupWorkout() {
+        const durationString = stepDurationInput.value;
+        let newDurationSeconds = parseInt(durationString);
+
+        if (
+          !durationString ||
+          isNaN(newDurationSeconds) ||
+          newDurationSeconds < 10
+        ) {
+          alert("Please enter a valid step duration of at least 10 seconds.");
+          return;
+        }
+
+        // 1. Update global state and localStorage
+        globalStepDurationSeconds = newDurationSeconds;
+        localStorage.setItem("workoutStepDuration", durationString);
+
+        // 2. Switch View and Start Workout
+        prepScreen.style.display = "none";
+        workoutScreen.style.display = "flex";
+
+        currentStepIndex = 0; // Reset to first step
+        const initialStepName = WORKOUT_STEPS[0].name;
+        stepNameDisplay.textContent = initialStepName;
+
+        statusMessage.textContent = statusUnPaused;
+
+        // 3. Start the timer loop
+        startTimer(10);
+      }
+
+      /**
+       * Runs on page load to check for saved state and initialize views.
+       */
+      function init() {
+        const savedDuration = localStorage.getItem("workoutStepDuration");
+
+        if (savedDuration) {
+          stepDurationInput.value = savedDuration;
+          globalStepDurationSeconds = parseInt(savedDuration);
+          console.log(`Loaded previous duration: ${savedDuration} seconds.`);
+        } else {
+          // Set default value if nothing is found, and initialize global state
+          stepDurationInput.value = 30;
+          globalStepDurationSeconds = 30;
+        }
+
+        // Setup Event Listeners
+        startButton.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setupWorkout();
+        });
+        document.body.addEventListener("click", (e) => {
+          // Only toggle if we are in the workout phase AND it's currently paused/stopped, OR if starting fresh
+          if (
+            !prepScreen.style.display ||
+            prepScreen.style.display === "none"
+          ) {
+            toggleTimer();
+          }
+        });
+
+        // Initial visual check to ensure button logic works
+        startButton.textContent = "Start Workout";
+      }
+
+      // --- EXECUTION START ---
+      init();
+    </script>
+  </body>
+</html>
