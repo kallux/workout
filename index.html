@@ -174,6 +174,40 @@
       let currentStepIndex = 0; // Tracks the index of the current step
       let globalStepDurationSeconds = 30; // Default duration, set by input value
 
+      // Screen Wake Lock to prevent phone sleep during workout
+      let wakeLock = null;
+
+      async function requestWakeLock() {
+        if ('wakeLock' in navigator) {
+          try {
+            wakeLock = await navigator.wakeLock.request('screen');
+            console.log('Wake lock acquired');
+            
+            // Handle wake lock release
+            window.addEventListener('beforeunload', () => {
+              releaseWakeLock();
+            });
+
+            // Handle wake lock loss (e.g., user manually releases)
+            wakeLock.addEventListener('release', () => {
+              console.log('Wake lock released');
+            });
+          } catch (err) {
+            console.error('Failed to acquire wake lock:', err);
+          }
+        } else {
+          console.log('Wake Lock API not supported');
+        }
+      }
+
+      async function releaseWakeLock() {
+        if (wakeLock !== null) {
+          await wakeLock.release();
+          wakeLock = null;
+          console.log('Wake lock released');
+        }
+      }
+
       // --- DOM Elements ---
       const prepScreen = document.getElementById("prep-screen");
       const workoutScreen = document.getElementById("workout-screen");
@@ -306,10 +340,13 @@
       /**
        * Handles the transition back to the preparation screen.
        */
-      function endWorkout() {
+      async function endWorkout() {
         clearInterval(timerInterval);
         timerInterval = null;
         isPaused = true;
+
+        // Release wake lock before ending workout
+        await releaseWakeLock();
 
         // Update display state
         timerDisplay.textContent = "00:00";
@@ -335,7 +372,7 @@
       /**
        * Main function to start or pause the timer based on user interaction (click anywhere).
        */
-      function setupWorkout() {
+      async function setupWorkout() {
         const durationString = stepDurationInput.value;
         let newDurationSeconds = parseInt(durationString);
 
@@ -352,7 +389,10 @@
         globalStepDurationSeconds = newDurationSeconds;
         localStorage.setItem("workoutStepDuration", durationString);
 
-        // 2. Switch View and Start Workout
+        // 2. Request wake lock to prevent screen sleep
+        await requestWakeLock();
+
+        // 3. Switch View and Start Workout
         prepScreen.style.display = "none";
         workoutScreen.style.display = "flex";
 
@@ -362,7 +402,7 @@
 
         statusMessage.textContent = statusUnPaused;
 
-        // 3. Start the timer loop
+        // 4. Start the timer loop
         startTimer(10);
       }
 
